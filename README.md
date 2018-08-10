@@ -11,15 +11,15 @@ It is useful if your services with Type `LoadBalancer` having firewall restricti
  In that case all required information would be taken from AWS instance metadata
  
  
- ####Note
+ #### Note
  Pod needs to be running on master node due to AWS InstanceProfile permissions
  
  
- ##Local
+ ## Local
  `go get github.com/legion-platform/kube-elb-security`
  `go/bin/kops-cluster-sg -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
  
  
- ##Services filter
+ ## Services filter
  By default controller watches on services with label `app=ingress-nginx`
  Could be defined by flag `-labelSelector=app=myapp`
