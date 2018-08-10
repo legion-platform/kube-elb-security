@@ -15,6 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -37,8 +40,8 @@ type sgRules struct {
 }
 
 var sess *session.Session
-var vpcID string
-var region string
+var vpcID *string
+var region *string
 var clientset *kubernetes.Clientset
 var labelSelector string
 var servicesWatcher watch.Interface
@@ -46,25 +49,62 @@ var servicesWatcher watch.Interface
 func init() {
 	var err error
 
-	labelSelector = *flag.String("labelSelector", "app=ingress-nginx", "ASD")
+	labelSelector = *flag.String("labelSelector", "app=ingress-nginx", "key=value pair for services filter")
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		glog.Fatal(err)
-	}
+	inCluster := flag.Bool("inCluster", true, "Use Kubernetes inCLuster connection")
+	vpcID = flag.String("vpc-id", "", "Define AWS vpc-id only if inCluster=false")
+	region = flag.String("region", "", "Define AWS region only if inCluster=false")
 
-	clientset, err = kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
+	var kubeconfig *string
+	if home := homeDir(); home != "" {
+		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+	} else {
+		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
 	}
 
 	flag.Parse()
 
-	if err != nil {
-		panic(err.Error())
+	metadata := ec2metadata.New(session.New())
+
+	if *inCluster {
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			glog.Fatal(err.Error())
+		}
+		clientset, err = kubernetes.NewForConfig(config)
+	} else {
+		config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+		if err != nil {
+			glog.Fatal(err.Error())
+		}
+		clientset, err = kubernetes.NewForConfig(config)
 	}
 
-	metadata := ec2metadata.New(session.New())
+	if *region == "" {
+		if *inCluster {
+			*region, err = metadata.Region()
+			if err != nil {
+				glog.Fatalf("Unable to retrieve the region from the EC2 instance %v\n", err)
+			}
+		} else {
+			glog.Fatal("AWS region is not defined. Flag example: -region us-east1")
+		}
+	}
+
+	if *vpcID == "" {
+		if *inCluster {
+			networkMac, err := metadata.GetMetadata("network/interfaces/macs/")
+			if err != nil {
+				glog.Fatalf("Unable to retrieve EC2 instance network interface mac address %v\n", err)
+			}
+			*vpcID, err = metadata.GetMetadata("network/interfaces/macs/" + networkMac + "/vpc-id")
+			if err != nil {
+				glog.Fatalf("Unable to retrieve EC2 instance VPC-ID %v\n", err)
+			}
+		} else {
+			glog.Fatalf("AWS vpc-id is not defined. Flag example: -vpc-id=vpc-01234567")
+		}
+	}
 
 	creds := credentials.NewChainCredentials(
 		[]credentials.Provider{
@@ -73,22 +113,9 @@ func init() {
 			&ec2rolecreds.EC2RoleProvider{Client: metadata},
 		})
 
-	region, err = metadata.Region()
-	if err != nil {
-		glog.Fatalf("Unable to retrieve the region from the EC2 instance %v\n", err)
-	}
-	networkMac, err := metadata.GetMetadata("network/interfaces/macs/")
-	if err != nil {
-		glog.Fatalf("Unable to retrieve EC2 instance network interface mac address %v\n", err)
-	}
-	vpcID, err = metadata.GetMetadata("network/interfaces/macs/" + networkMac + "/vpc-id")
-	if err != nil {
-		glog.Fatalf("Unable to retrieve EC2 instance VPC-ID %v\n", err)
-	}
-
 	sess, err = session.NewSession(&aws.Config{
 		Credentials: creds,
-		Region:      aws.String(region)},
+		Region:      aws.String(*region)},
 	)
 
 	if err != nil {
@@ -236,7 +263,7 @@ func getSG(elbURLs []string) (ret []string) {
 			{
 				Name: aws.String("vpc-id"),
 				Values: []*string{
-					aws.String(vpcID),
+					aws.String(*vpcID),
 				},
 			},
 		},
@@ -244,6 +271,10 @@ func getSG(elbURLs []string) (ret []string) {
 
 	if err != nil {
 		glog.Fatal(err.Error())
+	}
+
+	if len(result.SecurityGroups) == 0 {
+		glog.Fatalf("Failed to get security groups at VPC %v", *vpcID)
 	}
 
 	for _, sg := range result.SecurityGroups {
@@ -323,4 +354,11 @@ func updateSGs(rules []sgRules) {
 			glog.Infof("%v: No new rules to apply", rule.sgID)
 		}
 	}
+}
+
+func homeDir() string {
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	return os.Getenv("USERPROFILE") // windows
 }
