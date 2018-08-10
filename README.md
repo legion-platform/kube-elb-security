@@ -4,16 +4,21 @@ This is a Kubernetes controller that creates AWS security group rules for servic
 
 It is useful if your services with Type `LoadBalancer` having firewall restrictions.
 
+
 ## InCluster
-`./kube-elb-security -alsologtostderr`
+`/kube-elb-security -alsologtostderr`
  
  In that case all required information would be taken from AWS instance metadata
+ 
  
  ####Note
  Pod needs to be running on master node due to AWS InstanceProfile permissions
  
+ 
  ##Local
- `./kops-cluster-sg -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
+ `go get github.com/legion-platform/kube-elb-security`
+ `go/bin/kops-cluster-sg -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
+ 
  
  ##Services filter
  By default controller watches on services with label `app=ingress-nginx`
