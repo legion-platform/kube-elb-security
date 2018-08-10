@@ -43,13 +43,13 @@ var sess *session.Session
 var vpcID *string
 var region *string
 var clientset *kubernetes.Clientset
-var labelSelector string
+var labelSelector *string
 var servicesWatcher watch.Interface
 
 func init() {
 	var err error
 
-	labelSelector = *flag.String("labelSelector", "app=ingress-nginx", "key=value pair for services filter")
+	labelSelector = flag.String("labelSelector", "app=ingress-nginx", "key=value pair for services filter")
 
 	inCluster := flag.Bool("inCluster", true, "Use Kubernetes inCLuster connection")
 	vpcID = flag.String("vpc-id", "", "Define AWS vpc-id only if inCluster=false")
@@ -154,7 +154,7 @@ func main() {
 
 func restartServiceWatcher() {
 	if servicesWatcher != nil {
-		glog.Infof("Starting k8s client watcher on services using labels %v", labelSelector)
+		glog.Infof("Starting k8s client watcher on services using labels %v", *labelSelector)
 		servicesWatcher.Stop()
 	}
 	startServiceWatcher()
@@ -162,9 +162,9 @@ func restartServiceWatcher() {
 
 func startServiceWatcher() {
 
-	l, err := labels.Parse(labelSelector)
+	l, err := labels.Parse(*labelSelector)
 	if err != nil {
-		glog.Fatalf("Failed to parse selector %q: %v", labelSelector, err)
+		glog.Fatalf("Failed to parse selector %q: %v", *labelSelector, err)
 	}
 
 	serviceListOptions := metav1.ListOptions{
