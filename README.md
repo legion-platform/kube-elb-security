@@ -17,6 +17,7 @@ It is useful if your services with Type `LoadBalancer` having firewall restricti
  
  ## Local
  `go get github.com/legion-platform/kube-elb-security`
+ 
  `go/bin/kops-cluster-sg -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
  
  
