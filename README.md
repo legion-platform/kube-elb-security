@@ -16,9 +16,9 @@ It is useful if your services with Type `LoadBalancer` having firewall restricti
  
  
  ## Local
- `go get github.com/legion-platform/kube-elb-security`
+ `docker build --tag kube-elb-security .`
  
- `go/bin/kops-cluster-sg -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
+ `docker run -it --rm kube-elb-security /kube-elb-security -logtostderr -inCluster=false -region=us-east-1 -vpc-id=vpc-01234567`
  
  
  ## Services filter
