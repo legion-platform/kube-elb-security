@@ -2,7 +2,9 @@ FROM golang:1.10-alpine as builder
 
 RUN apk update && apk add git
 
-RUN go get github.com/legion-platform/kube-elb-security
+COPY main.go /go/src/github.com/legion-platform/kube-elb-security/main.go
+
+RUN go get -v github.com/legion-platform/kube-elb-security
 
 FROM alpine:latest
 
