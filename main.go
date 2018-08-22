@@ -275,7 +275,7 @@ func getPublicEIPs() (ret []sgRule) {
 
 	for _, eip := range eips.Addresses {
 		ret = append(ret, sgRule{
-			name:     *eip.NetworkInterfaceId,
+			name:     *eip.AllocationId,
 			publicIP: *eip.PublicIp + "/32",
 		})
 	}
