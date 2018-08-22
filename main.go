@@ -45,6 +45,7 @@ var region *string
 var clientset *kubernetes.Clientset
 var labelSelector *string
 var servicesWatcher watch.Interface
+var clusterName string
 
 func init() {
 	var err error
@@ -84,7 +85,7 @@ func init() {
 		if *inCluster {
 			*region, err = metadata.Region()
 			if err != nil {
-				glog.Fatalf("Unable to retrieve the region from the EC2 instance %v\n", err)
+				glog.Fatal("Unable to retrieve the region from the EC2 instance %v\n", err)
 			}
 		} else {
 			glog.Fatal("AWS region is not defined. Flag example: -region us-east1")
@@ -121,6 +122,8 @@ func init() {
 	if err != nil {
 		glog.Fatal(err.Error())
 	}
+
+	clusterName = getClusterName()
 
 }
 
@@ -178,7 +181,11 @@ func startServiceWatcher() {
 
 	time.Sleep(time.Second) //Sync channels
 
-	nodes := getNodesPublicAddresses()
+	rules := getNodesPublicAddresses()
+
+	for _, rule := range getPublicEIPs() {
+		rules = append(rules, rule)
+	}
 
 	resultChan := servicesWatcher.ResultChan()
 
@@ -189,11 +196,12 @@ func startServiceWatcher() {
 		}
 		switch event.Type {
 		case watch.Added:
-			processService(svc, nodes)
+			processService(svc, rules)
 		case watch.Modified:
-			processService(svc, nodes)
+			processService(svc, rules)
 		case watch.Deleted:
 			glog.Infof("Processing deleted service %v", svc.Name)
+			//TODO Implement cleanup after service deletion
 		}
 	}
 }
@@ -246,6 +254,91 @@ func getNodesPublicAddresses() (ret []sgRule) {
 			}
 		}
 	}
+	return
+}
+
+func getPublicEIPs() (ret []sgRule) {
+	svc := ec2.New(sess)
+
+	eips, err := svc.DescribeAddresses(&ec2.DescribeAddressesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("tag:KubernetesCluster"),
+				Values: []*string{aws.String(clusterName)},
+			},
+		},
+	})
+
+	if err != nil {
+		glog.Fatal(err.Error())
+	}
+
+	for _, eip := range eips.Addresses {
+		ret = append(ret, sgRule{
+			name:     *eip.NetworkInterfaceId,
+			publicIP: *eip.PublicIp + "/32",
+		})
+	}
+
+	return ret
+
+}
+
+func getClusterName() (tag string) {
+
+	node, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{
+		LabelSelector: "kubernetes.io/role=master",
+		Limit:         1,
+	})
+
+	if err != nil {
+		glog.Fatal(err.Error())
+	}
+
+	if len(node.Items) == 0 {
+		glog.Fatal("Found 0 master nodes")
+	}
+
+	masterPrivateIP := ""
+
+	for _, address := range node.Items[0].Status.Addresses {
+		if address.Type == "InternalIP" {
+			masterPrivateIP = address.Address
+		}
+	}
+
+	if masterPrivateIP == "" {
+		glog.Fatal("Failed to get masters " + node.Items[0].Name + " InternalIP")
+	}
+
+	svc := ec2.New(sess)
+	instances, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("private-ip-address"),
+				Values: []*string{aws.String(masterPrivateIP)},
+			},
+		},
+	})
+
+	if err != nil {
+		glog.Fatal(err.Error())
+	}
+
+	if len(instances.Reservations) == 0 {
+		glog.Fatal("AWS returned 0 reservations for master instance " + node.Items[0].Name + "\n" + instances.String())
+	}
+
+	if len(instances.Reservations[0].Instances) == 0 {
+		glog.Fatal("AWS returned 0 instances for master instance " + node.Items[0].Name + "\n" + instances.String())
+	}
+
+	for _, instanceTag := range instances.Reservations[0].Instances[0].Tags {
+		if *instanceTag.Key == "KubernetesCluster" {
+			tag = *instanceTag.Value
+		}
+	}
+
 	return
 }
 
@@ -324,7 +417,7 @@ func updateSGs(rules []sgRules) {
 						ToPort:     aws.Int64(port.number),
 						IpRanges: []*ec2.IpRange{
 							{CidrIp: aws.String(record.publicIP),
-								Description: aws.String("Rule for k8s node " + record.name + " Port " + strconv.FormatInt(port.number, 10))},
+								Description: aws.String("Rule for k8s " + record.name + " Port " + strconv.FormatInt(port.number, 10))},
 						},
 					})
 				}
