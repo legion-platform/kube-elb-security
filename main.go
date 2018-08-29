@@ -270,7 +270,7 @@ func getPublicEIPs() (ret []sgRule) {
 	})
 
 	if err != nil {
-		glog.Fatal(err.Error())
+		glog.Warning(err.Error())
 	}
 
 	for _, eip := range eips.Addresses {
